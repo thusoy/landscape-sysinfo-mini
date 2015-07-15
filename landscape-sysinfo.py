@@ -11,6 +11,8 @@
 # 2014-10-08 V1.1 jw, survive without swap
 # 2014-10-13 V1.2 jw, survive without network
 
+from __future__ import division
+
 import os
 import posix
 import subprocess
@@ -60,8 +62,8 @@ def get_number_of_running_processes():
 
 def get_root_fs_stats():
   statfs = os.statvfs('/')
-  root_usage = 100 - 100.*statfs.f_bavail/statfs.f_blocks
-  root_size_in_gb = float(statfs.f_bsize*statfs.f_blocks)/2**30
+  root_usage = 1 - statfs.f_bavail/statfs.f_blocks
+  root_size_in_gb = statfs.f_bsize*statfs.f_blocks/2**30
   return (root_usage, root_size_in_gb)
 
 def get_device_address(device):

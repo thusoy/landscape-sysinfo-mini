@@ -1,6 +1,6 @@
 #!/usr/bin/python
 #
-# landscape-sysinfo-mini.py -- a trivial re-implementation of the 
+# landscape-sysinfo-mini.py -- a trivial re-implementation of the
 # sysinfo printout shown on debian at boot time. No twisted, no reactor, just /proc & utmp
 #
 # (C) 2014 jw@owncloud.com
@@ -11,60 +11,97 @@
 # 2014-10-08 V1.1 jw, survive without swap
 # 2014-10-13 V1.2 jw, survive without network
 
-import sys,os,time,posix,glob
+import os
+import posix
 import subprocess
+import time
+import re
 
 _version_ = '1.2'
 
-def dev_addr(device):
+def main():
+  load_average = get_system_load_average()
+  processes = get_number_of_running_processes()
+  defaultdev = get_default_device()
+  root_usage, root_size_in_gb = get_root_fs_stats()
+  ipaddr = get_device_address(defaultdev)
+  num_users = get_number_of_logged_in_users()
+  memory_usage, swap_usage = get_memory_stats()
+
+  # For percentages, direct percentage formatting with '{:.2%}'.format(val)
+  # could also have been used, but was found to be significantly slower than the
+  # equivalent %-style formatting.
+  print "  System information as of %s\n" % time.asctime()
+  print "  System load:  %.1f%%                Processes:           %d" % (load_average*100, processes)
+  print "  Usage of /:   %.1f%% of %.2fGB      Users logged in:     %d" % (root_usage*100, root_size_in_gb, num_users)
+  print "  Memory usage: %.1f%%                IP address for %s: %s" % (memory_usage*100, defaultdev, ipaddr)
+  print "  Swap usage:   %s" % (".1f%%" % swap_usage*100 if swap_usage else '---')
+
+
+def get_memory_stats():
+  memory_info = get_meminfo()
+  memory_usage = 1 - memory_info['MemFree:']/(memory_info['MemTotal:'] or 1)
+  swap_total = memory_info['SwapTotal:']
+  if swap_total == 0:
+    swap_usage = None
+  else:
+    swap_usage = 1 - memory_info['SwapFree:']/(swap_total)
+  return memory_usage, swap_usage
+
+def get_system_load_average():
+  with open('/proc/loadavg') as fh:
+    one_min_avg, five_min_avg, fifteen_min_avg, _ = fh.read().split(None, 3)
+    return float(five_min_avg)
+
+def get_number_of_running_processes():
+  number_re = re.compile('^[0-9]*$')
+  processes = filter(lambda e: number_re.match(e), os.listdir('/proc'))
+  return len(processes)
+
+def get_root_fs_stats():
+  statfs = os.statvfs('/')
+  root_usage = 100 - 100.*statfs.f_bavail/statfs.f_blocks
+  root_size_in_gb = float(statfs.f_bsize*statfs.f_blocks)/2**30
+  return (root_usage, root_size_in_gb)
+
+def get_device_address(device):
   """ find the local ip address on the given device """
-  if device is None: return None
-  for l in os.popen('ip route list dev '+device):
-    seen=''
-    for a in l.split():
-      if seen == 'src': return a
+  if device is None:
+    return None
+  command = ['ip', 'route', 'list', 'dev', device]
+  ip_routes = subprocess.check_output(command).strip()
+  for line in ip_routes.split('\n'):
+    seen = ''
+    for a in line.split():
+      if seen == 'src':
+        return a
       seen = a
   return None
 
-def default_dev():
+def get_default_device():
   """ find the device where our default route is """
-  for l in open('/proc/net/route').readlines():
-    a = l.split()
-    if a[1] == '00000000':
-      return a[0]
+  with open('/proc/net/route') as fh:
+    for line in fh:
+      iface, dest, _ = line.split(None, 2)
+      if dest == '00000000':
+        return iface
   return None
 
-def utmp_count():
-  logged_in_users = subprocess.check_output('who').strip()
+def get_number_of_logged_in_users():
+  logged_in_users = subprocess.check_output(['who']).strip()
   return len(logged_in_users.split('\n'))
 
-def proc_meminfo():
+def get_meminfo():
   items = {}
-  for l in open('/proc/meminfo').readlines():
-    a = l.split()
-    items[a[0]] = int(a[1])
-  # print items['MemTotal:'], items['MemFree:'], items['SwapTotal:'], items['SwapFree:']
+  with open('/proc/meminfo') as fh:
+    for line in fh:
+      line_items = line.split()
+      if len(line_items) == 3:
+        key, value, unit = line_items
+      else:
+        key, value = line_items
+      items[key] = int(value)
   return items
 
-loadav = float(open("/proc/loadavg").read().split()[1])
-processes = len(glob.glob('/proc/[0-9]*'))
-statfs = os.statvfs('/')
-rootperc = 100-100.*statfs.f_bavail/statfs.f_blocks
-rootgb = statfs.f_bsize*statfs.f_blocks/1024./1024/1024
-rootusage = "%.1f%% of %.2fGB" % (rootperc, rootgb)
-defaultdev = default_dev()
-ipaddr = dev_addr(defaultdev)
-users = utmp_count()
-meminfo = proc_meminfo()
-memperc = "%d%%" % (100-100.*meminfo['MemFree:']/(meminfo['MemTotal:'] or 1))
-swapperc = "%d%%" % (100-100.*meminfo['SwapFree:']/(meminfo['SwapTotal:'] or 1))
-
-if meminfo['SwapTotal:'] == 0: swapperc = '---'
-
-print "  System information as of %s\n" % time.asctime()
-print "  System load:  %-5.2f                Processes:           %d" % (loadav, processes)
-print "  Usage of /:   %-20s Users logged in:     %d"% (rootusage, users)
-print "  Memory usage: %-4s                 IP address for %s: %s" % (memperc, defaultdev, ipaddr)
-print "  Swap usage:   %s" % (swapperc)
-
-sys.exit(0)
+if __name__ == '__main__':
+  main()

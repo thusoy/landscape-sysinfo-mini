@@ -6,14 +6,13 @@
 # (C) 2014 jw@owncloud.com
 #
 # inspired by ubuntu 14.10 /etc/update-motd.d/50-landscape-sysinfo
-# Requires: python-utmp 
-# for counting users.
 #
 # 2014-09-07 V1.0 jw, ad hoc writeup, feature-complete. Probably buggy?
 # 2014-10-08 V1.1 jw, survive without swap
 # 2014-10-13 V1.2 jw, survive without network
 
-import sys,os,time,posix,glob,utmp
+import sys,os,time,posix,glob
+import subprocess
 
 _version_ = '1.2'
 
@@ -36,11 +35,8 @@ def default_dev():
   return None
 
 def utmp_count():
-  u = utmp.UtmpRecord()
-  users = 0
-  for i in u:
-    if i.ut_type == utmp.USER_PROCESS: users += 1
-  return users
+  logged_in_users = subprocess.check_output('who').strip()
+  return len(logged_in_users.split('\n'))
 
 def proc_meminfo():
   items = {}
